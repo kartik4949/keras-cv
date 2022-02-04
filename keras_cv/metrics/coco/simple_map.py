@@ -122,8 +122,9 @@ class COCOMeanAveragePrecision(tf.keras.metrics.Metric):
         precision_result = tf.TensorArray(tf.float32, size=len(self.recall_thresholds))
         for ri in tf.range(len(self.recall_thresholds)):
             pi = inds[ri]
-            pr_res = pr[pi]
-            precision_result = precision_result.write(ri, pr_res)
+            if pi < tf.shape(pr)[0]:
+                pr_res = pr[pi]
+                precision_result = precision_result.write(ri, pr_res)
 
         pr_per_threshold = precision_result.stack()
         tf.print('PR Per Threshold', pr_per_threshold)
