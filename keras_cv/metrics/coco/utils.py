@@ -97,6 +97,7 @@ def sort_bboxes(boxes, axis=5):
 
     return boxes_sorted_list.stack()
 
+
 def match_boxes(y_true, y_pred, threshold, ious):
     """matches bounding boxes from y_true to boxes in y_pred.
 
@@ -126,16 +127,16 @@ def match_boxes(y_true, y_pred, threshold, ious):
         element_shape=(),
     )
     for i in tf.range(num_true):
-        gt_matches = gt_matches.write(i, -1)
+        gt_matches = gt_matches.write(i, -2)
     for i in tf.range(num_pred):
-        pred_matches = pred_matches.write(i, -1)
+        pred_matches = pred_matches.write(i, -2)
 
     for detection_idx in tf.range(num_pred):
-        match_index = -1
+        match_index = -2
         iou = tf.math.minimum(threshold, 1 - 1e-10)
 
         for gt_idx in tf.range(num_true):
-            if gt_matches.gather([gt_idx]) > -1:
+            if gt_matches.gather([gt_idx]) > -2:
                 continue
             # TODO(lukewood): update clause to account for gtIg
             # if m > -1 and gtIg[m] == 0 and gtIg[gind] == 1:
@@ -148,7 +149,23 @@ def match_boxes(y_true, y_pred, threshold, ious):
 
         # Write back the match indices
         pred_matches = pred_matches.write(detection_idx, match_index)
-        if match_index == -1:
+        if match_index == -2:
             continue
         gt_matches = gt_matches.write(match_index, detection_idx)
     return pred_matches.stack()
+
+def result(self):
+    present_values = self.ground_truth_boxes != 0
+    n_present_categories = tf.math.reduce_sum(
+        tf.cast(present_values, tf.float32), axis=-1
+    )
+    if n_present_categories == 0.0:
+        return 0.0
+
+    recalls = tf.math.divide_no_nan(
+        self.true_positives, self.ground_truth_boxes[None, :]
+    )
+    recalls_per_threshold = (
+        tf.math.reduce_sum(recalls, axis=-1) / n_present_categories
+    )
+    return tf.math.reduce_mean(recalls_per_threshold)

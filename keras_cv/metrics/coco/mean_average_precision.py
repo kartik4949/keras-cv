@@ -135,6 +135,17 @@ class COCOMeanAveragePrecision(tf.keras.metrics.Metric):
 
         rcs = []
         prs = []
+
+        """
+        Notes:
+            in order to support MaP tracking across batches we need the following:
+            we will need to track which bounding boxes were classified as true positives,
+            which were false positives, their confidence scores, and track all
+            of this information across categories & IoU thresholds.
+
+            Then, we can use this information in `result()` to compute the exact
+            MaP value for the given set of bounding boxes.
+        """
         for k_i in tf.range(num_categories):
             dts = dtm[k_i]
             gts = ground_truths[k_i]
