@@ -46,15 +46,19 @@ class COCOMeanAveragePrecision(tf.keras.metrics.Metric):
         self.area_range = area_range
         self.max_detections = max_detections
         self.category_id = category_id
-        self.recall_thresholds = recall_thresholds
+        self.recall_thresholds = recall_thresholds or [x/100 for x in range(0, 101)]
+
+        self.gts = self.add_weight('gts', dtype=tf.float32, initializer='zeros')
+
         self.dt_scores = tf.TensorArray(tf.float32, size=0, dynamic_size=True, clear_after_read=False)
         self.dtm =  tf.TensorArray(tf.int32, size=0, dynamic_size=True, clear_after_read=False)
-        self.gts = tf.TensorArray(tf.int32, size=0, dynamic_size=True, clear_after_read=False)
+        #self.counter = tf.Variable(initial_value=0, trainable=False)
     
     def reset_state(self):
         self.dt_scores = tf.TensorArray(tf.float32, size=0, dynamic_size=True, clear_after_read=False)
         self.dtm =  tf.TensorArray(tf.int32, size=0, dynamic_size=True, clear_after_read=False)
-        self.gts = tf.TensorArray(tf.int32, size=0, dynamic_size=True, clear_after_read=False)
+        self.gts.assign(0.)
+        #self.counter.assign(0.)
     
     def update_state(self, y_true, y_pred):
         num_images = tf.shape(y_true)[0]
@@ -87,16 +91,15 @@ class COCOMeanAveragePrecision(tf.keras.metrics.Metric):
                 bbox.pad_bbox_batch_to_shape(detections[:, bbox.CONFIDENCE], (pad_to_shape,))
             )
             self.dtm = self.dtm.write(img, bbox.pad_bbox_batch_to_shape(pred_matches, (pad_to_shape,)))
-            self.gts = self.gts.write(img, tf.shape(ground_truths)[0])
-
+            self.gts.assign_add(tf.cast(tf.shape(ground_truths)[0], tf.float32))
+            
     def result(self):
         dt_scores = self.dt_scores.stack()
         dt_scores = tf.reshape(dt_scores, (-1,))
         dtm = self.dtm.stack()
         dtm = tf.reshape(dtm, (-1,))
 
-        gts = self.gts.stack()
-        gts = tf.math.reduce_sum(gts)
+        gts = self.gts
 
         indices = tf.argsort(dt_scores, direction='DESCENDING')
         dtm = tf.gather(dtm, indices)
@@ -108,16 +111,20 @@ class COCOMeanAveragePrecision(tf.keras.metrics.Metric):
 
         tp_sum = tf.cumsum(tps, axis=-1)
         fp_sum = tf.cumsum(fps, axis=-1)
-        precision_result = tf.TensorArray(tf.float32, size=len(self.recall_thresholds))
-        for tp_idx in tf.range(tf.shape(tp_sum)[0]):
-            tp = tp_sum[tp_idx]
-            fp = fp_sum[tp_idx]
-            
-            rc = tp / gts
-            pr = tp / (fp + tp)
 
-            inds = tf.search_sorted(rc, tf.constant(self.recall_thresholds), side='left')
-            for ri in tf.range(len(self.recall_thresholds)):
-                pi = inds[ri]
-                precision_result = precision_result.write(ri, pi)
-        return tf.math.reduce_mean(precision_result.stack())
+        tf.print('tp_sum', tp_sum)
+        tf.print('fp_sum', fp_sum)
+        rc = tp_sum / gts
+        pr = tp_sum / (fp_sum + tp_sum)
+        tf.print('Recall', rc)
+        tf.print('Precision', pr)
+        inds = tf.searchsorted(rc, tf.constant(self.recall_thresholds), side='left')
+        precision_result = tf.TensorArray(tf.float32, size=len(self.recall_thresholds))
+        for ri in tf.range(len(self.recall_thresholds)):
+            pi = inds[ri]
+            pr_res = pr[pi]
+            precision_result = precision_result.write(ri, pr_res)
+
+        pr_per_threshold = precision_result.stack()
+        tf.print('PR Per Threshold', pr_per_threshold)
+        return tf.math.reduce_mean(pr_per_threshold)
